@@ -1,0 +1,12 @@
+{
+  "appId": "com.rams.aura8",
+  "appName": "AURA8",
+  "webDir": "www",
+  "server": {
+    "url": "https://ramizxhixha-a11y.github.io/aura/AURA8_v118.html",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
