@@ -16,14 +16,37 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - uses: android-actions/setup-android@v3
+
+      # Signature fixe : toutes les versions partagent la meme cle.
+      # => les futures mises a jour s'installent SANS desinstaller.
+      - name: Cle debug fixe
+        run: |
+          mkdir -p ~/.android
+          cp debug.keystore ~/.android/debug.keystore
+          echo "Cle debug fixe en place."
+
       - run: npm install
       - run: npx cap add android
       - run: npx cap sync android
+
+      # FIX CRASH Android 14 : le plugin oublie de declarer son service
+      # ET de lui donner un foregroundServiceType. On repare le manifeste.
+      - name: Declarer le service arriere-plan (fix crash Android 14)
+        run: |
+          MF=android/app/src/main/AndroidManifest.xml
+          perl -0pi -e 's{</application>}{        <service android:name="io.globules.cordova.plugin.ForegroundService" android:exported="false" android:foregroundServiceType="specialUse">\n            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="keeps the AURA8 trading bot running while the screen is off" />\n        </service>\n    </application>}s unless /ForegroundService/' "$MF"
+          perl -0pi -e 's{<application}{<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application}s unless /POST_NOTIFICATIONS/' "$MF"
+          echo "--- verif manifeste ---"
+          echo "ForegroundService declare : $(grep -c ForegroundService "$MF")"
+          echo "POST_NOTIFICATIONS        : $(grep -c POST_NOTIFICATIONS "$MF")"
+          echo "specialUse                : $(grep -c specialUse "$MF")"
+
       - name: Build APK debug
         run: |
           cd android
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
+
       - uses: actions/upload-artifact@v4
         with:
           name: aura8-apk
