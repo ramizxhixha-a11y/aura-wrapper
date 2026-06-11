@@ -4,7 +4,8 @@
   "private": true,
   "dependencies": {
     "@capacitor/android": "^6.2.0",
-    "@capacitor/core": "^6.2.0"
+    "@capacitor/core": "^6.2.0",
+    "@globules-io/cordova-plugin-background-mode": "github:globules-io/cordova-plugin-background-mode"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.0"
