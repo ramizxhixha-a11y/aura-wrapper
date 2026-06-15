@@ -18,7 +18,6 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       # Signature fixe : toutes les versions partagent la meme cle.
-      # => les futures mises a jour s'installent SANS desinstaller.
       - name: Cle debug fixe
         run: |
           mkdir -p ~/.android
@@ -27,34 +26,42 @@ jobs:
 
       - run: npm install
 
-      # FIX CRASH #2 : sous Capacitor, webView.getEngine() peut renvoyer null
-      # => on rend l'appel non-bloquant (sinon plantage ~2s apres l'ouverture).
+      # FIX CRASH #2 : sous Capacitor, webView.getEngine() peut renvoyer null.
       - name: Securiser le plugin (getEngine null-safe)
         run: |
           PJ=node_modules/@globules-io/cordova-plugin-background-mode/src/android/BackgroundMode.java
           perl -0pi -e 's{View view = webView\.getEngine\(\)\.getView\(\);}{View view; try { view = webView.getEngine().getView(); } catch (Throwable __t) { Log.e(TAG, "wv-opt skipped: " + __t); return; } if (view == null) return;}s' "$PJ"
-          echo "garde getView ajoutee : $(grep -c 'wv-opt skipped' "$PJ") (doit etre 1)"
+          echo "garde getView : $(grep -c 'wv-opt skipped' "$PJ")"
 
       - run: npx cap add android
       - run: npx cap sync android
 
-      # FIX CRASH #1 : le plugin oublie de declarer son service ET son
-      # foregroundServiceType. On repare le manifeste (sinon crash Android 14).
-      - name: Declarer le service arriere-plan (fix crash Android 14)
+      # FIX CRASH #1 : declarer le service + foregroundServiceType (Android 14).
+      - name: Declarer le service arriere-plan
         run: |
           MF=android/app/src/main/AndroidManifest.xml
           perl -0pi -e 's{</application>}{        <service android:name="io.globules.cordova.plugin.ForegroundService" android:exported="false" android:foregroundServiceType="specialUse">\n            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="keeps the AURA8 trading bot running while the screen is off" />\n        </service>\n    </application>}s unless /ForegroundService/' "$MF"
           perl -0pi -e 's{<application}{<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application}s unless /POST_NOTIFICATIONS/' "$MF"
-          echo "--- verif manifeste ---"
-          echo "ForegroundService : $(grep -c ForegroundService "$MF")"
-          echo "POST_NOTIFICATIONS: $(grep -c POST_NOTIFICATIONS "$MF")"
-          echo "specialUse        : $(grep -c specialUse "$MF")"
+          echo "service: $(grep -c ForegroundService "$MF") | notif: $(grep -c POST_NOTIFICATIONS "$MF")"
+
+      # LOGO AURA : remplace les icones par le vrai logo (PNG plein, pas de masque adaptatif).
+      - name: Logo AURA (icone de l'app)
+        run: |
+          command -v convert >/dev/null || (sudo apt-get update && sudo apt-get install -y imagemagick)
+          RES=android/app/src/main/res
+          for pair in "mdpi 48" "hdpi 72" "xhdpi 96" "xxhdpi 144" "xxxhdpi 192"; do
+            set -- $pair; D=$1; S=$2
+            convert aura-icon-512.png -resize ${S}x${S} "$RES/mipmap-$D/ic_launcher.png"
+            convert aura-icon-512.png -resize ${S}x${S} "$RES/mipmap-$D/ic_launcher_round.png"
+          done
+          rm -f "$RES"/mipmap-anydpi-v26/ic_launcher.xml "$RES"/mipmap-anydpi-v26/ic_launcher_round.xml
+          echo "icones AURA generees : $(ls $RES/mipmap-xxxhdpi/ic_launcher.png)"
 
       - name: Build APK debug
         run: |
           cd android
           chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ANDROID_SDK_HOME="$HOME" ./gradlew assembleDebug --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
