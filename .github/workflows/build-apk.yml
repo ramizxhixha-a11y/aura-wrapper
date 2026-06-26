@@ -47,6 +47,10 @@ jobs:
       # LOGO AURA : remplace les icones par le vrai logo (PNG plein, pas de masque adaptatif).
       - name: Logo AURA (icone de l'app)
         run: |
+          if [ ! -f aura-icon-512.png ]; then
+            echo "aura-icon-512.png absent -> on garde l'icone par defaut, le build continue."
+            exit 0
+          fi
           command -v convert >/dev/null || (sudo apt-get update && sudo apt-get install -y imagemagick)
           RES=android/app/src/main/res
           for pair in "mdpi 48" "hdpi 72" "xhdpi 96" "xxhdpi 144" "xxxhdpi 192"; do
