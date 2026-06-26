@@ -25,6 +25,7 @@ jobs:
           echo "Cle debug fixe en place."
 
       - run: npm install
+      - run: npm install @capacitor/filesystem@^6.0.0
 
       # FIX CRASH #2 : sous Capacitor, webView.getEngine() peut renvoyer null.
       - name: Securiser le plugin (getEngine null-safe)
