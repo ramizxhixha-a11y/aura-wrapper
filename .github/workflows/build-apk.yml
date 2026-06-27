@@ -1,0 +1,83 @@
+name: Build AURA8 APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+
+      # Signature fixe : toutes les versions partagent la meme cle.
+      - name: Cle debug fixe
+        run: |
+          mkdir -p ~/.android
+          cp debug.keystore ~/.android/debug.keystore
+          echo "Cle debug fixe en place."
+
+      - run: npm install
+      - run: npm install @capacitor/filesystem@^6.0.0
+
+      # FIX CRASH #2 : sous Capacitor, webView.getEngine() peut renvoyer null.
+      - name: Securiser le plugin (getEngine null-safe)
+        run: |
+          PJ=node_modules/@globules-io/cordova-plugin-background-mode/src/android/BackgroundMode.java
+          perl -0pi -e 's{View view = webView\.getEngine\(\)\.getView\(\);}{View view; try { view = webView.getEngine().getView(); } catch (Throwable __t) { Log.e(TAG, "wv-opt skipped: " + __t); return; } if (view == null) return;}s' "$PJ"
+          echo "garde getView : $(grep -c 'wv-opt skipped' "$PJ")"
+
+      - run: npx cap add android
+      - run: npx cap sync android
+      - name: Desactiver le cache WebView (toujours charger le code frais)
+        run: |
+          MA=$(find android/app/src/main/java -name MainActivity.java | head -1)
+          if [ -z "$MA" ]; then echo "MainActivity introuvable"; exit 1; fi
+          PKG=$(grep -m1 '^package ' "$MA")
+          BODY=$(echo 'aW1wb3J0IGFuZHJvaWQub3MuQnVuZGxlOwppbXBvcnQgYW5kcm9pZC53ZWJraXQuV2ViU2V0dGluZ3M7CmltcG9ydCBjb20uZ2V0Y2FwYWNpdG9yLkJyaWRnZUFjdGl2aXR5OwoKcHVibGljIGNsYXNzIE1haW5BY3Rpdml0eSBleHRlbmRzIEJyaWRnZUFjdGl2aXR5IHsKICAgIEBPdmVycmlkZQogICAgcHVibGljIHZvaWQgb25DcmVhdGUoQnVuZGxlIHNhdmVkSW5zdGFuY2VTdGF0ZSkgewogICAgICAgIHN1cGVyLm9uQ3JlYXRlKHNhdmVkSW5zdGFuY2VTdGF0ZSk7CiAgICAgICAgdHJ5IHsKICAgICAgICAgICAgV2ViU2V0dGluZ3Mgd3MgPSB0aGlzLmJyaWRnZS5nZXRXZWJWaWV3KCkuZ2V0U2V0dGluZ3MoKTsKICAgICAgICAgICAgd3Muc2V0Q2FjaGVNb2RlKFdlYlNldHRpbmdzLkxPQURfTk9fQ0FDSEUpOwogICAgICAgIH0gY2F0Y2ggKEV4Y2VwdGlvbiBlKSB7fQogICAgfQp9Cg==' | base64 -d)
+          printf '%s\n%s\n' "$PKG" "$BODY" > "$MA"
+          echo "=== MainActivity patche (cache OFF) ==="; cat "$MA"
+
+      # FIX CRASH #1 : declarer le service + foregroundServiceType (Android 14).
+      - name: Declarer le service arriere-plan
+        run: |
+          MF=android/app/src/main/AndroidManifest.xml
+          perl -0pi -e 's{</application>}{        <service android:name="io.globules.cordova.plugin.ForegroundService" android:exported="false" android:foregroundServiceType="specialUse">\n            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="keeps the AURA8 trading bot running while the screen is off" />\n        </service>\n    </application>}s unless /ForegroundService/' "$MF"
+          perl -0pi -e 's{<application}{<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application}s unless /POST_NOTIFICATIONS/' "$MF"
+          echo "service: $(grep -c ForegroundService "$MF") | notif: $(grep -c POST_NOTIFICATIONS "$MF")"
+
+      # LOGO AURA : remplace les icones par le vrai logo (PNG plein, pas de masque adaptatif).
+      - name: Logo AURA (icone de l'app)
+        run: |
+          if [ ! -f aura-icon-512.png ]; then
+            echo "aura-icon-512.png absent -> on garde l'icone par defaut, le build continue."
+            exit 0
+          fi
+          command -v convert >/dev/null || (sudo apt-get update && sudo apt-get install -y imagemagick)
+          RES=android/app/src/main/res
+          for pair in "mdpi 48" "hdpi 72" "xhdpi 96" "xxhdpi 144" "xxxhdpi 192"; do
+            set -- $pair; D=$1; S=$2
+            convert aura-icon-512.png -resize ${S}x${S} "$RES/mipmap-$D/ic_launcher.png"
+            convert aura-icon-512.png -resize ${S}x${S} "$RES/mipmap-$D/ic_launcher_round.png"
+          done
+          rm -f "$RES"/mipmap-anydpi-v26/ic_launcher.xml "$RES"/mipmap-anydpi-v26/ic_launcher_round.xml
+          echo "icones AURA generees : $(ls $RES/mipmap-xxxhdpi/ic_launcher.png)"
+
+      - name: Build APK debug
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ANDROID_SDK_HOME="$HOME" ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aura8-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
